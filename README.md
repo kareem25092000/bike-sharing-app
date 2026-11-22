@@ -2,7 +2,7 @@
 
 Interactive Streamlit app analysing **17,379 hourly bike rentals** in Washington D.C. (2011–2012, UCI Bike Sharing Dataset).
 
-**Live app:** https://YOUR-APP-NAME.streamlit.app  *(replace after deploying)*
+**Live app:** https://bike-sharing-app-karim-mohamed-almamlouk.streamlit.app/
 
 ## What the app shows
 | Tab | Question answered |
