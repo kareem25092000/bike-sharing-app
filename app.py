@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -16,6 +17,11 @@ def show(fig):
         st.plotly_chart(fig, width="stretch")
     except TypeError:
         st.plotly_chart(fig, use_container_width=True)
+
+
+def answer(text):
+    """Written answer shown under a question (computed on the full dataset)."""
+    st.info(text, icon="✅")
 
 
 @st.cache_data
@@ -38,7 +44,8 @@ def load_data(file=None):
 
 
 st.title("🚲 Bike Sharing Demand — Washington D.C. (2011–2012)")
-st.caption("Hourly rentals from the UCI Bike Sharing dataset. Use the sidebar filters; every chart and number updates.")
+st.caption("Hourly rentals from the UCI Bike Sharing dataset. Use the sidebar filters: charts and KPIs update. "
+           "The ✅ answers under each question are computed on the full dataset.")
 
 try:
     df = load_data()
@@ -47,6 +54,46 @@ except FileNotFoundError:
     if up is None:
         st.stop()
     df = load_data(up)
+
+# ---------------- Statistics on the FULL dataset (used by the written answers) ----------------
+fh = df.groupby(["hr", "Day type"]).cnt.mean()
+wk_peak8, wk_peak17 = fh[(8, "Working day")], fh[(17, "Working day")]
+nw = fh.xs("Non-working day", level="Day type")
+nw_hr, nw_val = nw.idxmax(), nw.max()
+wd_mean = df.groupby("weekday").cnt.mean()
+sm = df.groupby("Season").cnt.mean()
+dc = df.groupby("Day category").cnt.mean()
+yr_tot = df.groupby("Year").cnt.sum()
+growth = yr_tot[2012] / yr_tot[2011] - 1
+mmf = df.pivot_table(index="mnth", columns="Year", values="cnt", aggfunc="sum")
+mg = (mmf[2012] / mmf[2011] - 1) * 100
+dday = df.groupby("dteday").cnt.sum()
+w_means = df.groupby("weathersit").cnt.mean()
+wh = df.groupby(["hr", "weathersit"]).cnt.mean().unstack()
+red8 = 1 - wh.loc[8, 3] / wh.loc[8, 1]
+red17 = 1 - wh.loc[17, 3] / wh.loc[17, 1]
+WCOLS = ["Temp (°C)", "Feels-like (°C)", "Humidity (%)", "Wind (raw)"]
+corr = df[WCOLS + ["cnt"]].corr()["cnt"].drop("cnt")
+corr_txt = ", ".join(f"{k.split(' (')[0].lower()} {v:+.2f}" for k, v in corr.items())
+cas_day = df.groupby("Day type")[["casual", "cnt"]].sum()
+cas_share = cas_day.casual / cas_day.cnt
+cas_season = df.groupby("Season")[["casual", "cnt"]].sum()
+cas_season = cas_season.casual / cas_season.cnt
+cas_hr = df.groupby("hr")[["casual", "cnt"]].sum()
+cas_hr = cas_hr.casual / cas_hr.cnt
+mh_full = df.pivot_table(index="mnth", columns="hr", values="cnt", aggfunc="mean")
+mh_m, mh_h = mh_full.stack().idxmax()
+iqr = df.groupby("hr").cnt.quantile(.75) - df.groupby("hr").cnt.quantile(.25)
+iqr_top = sorted(iqr.nlargest(3).index)
+skew_cnt, skew_log = df.cnt.skew(), np.log1p(df.cnt).skew()
+expected_rows = (df.dteday.max() - df.dteday.min()).days * 24 + 24
+missing_hours = expected_rows - len(df)
+wind_zero = (df.windspeed == 0).mean()
+corr_all_cols = ["Temp (°C)", "Feels-like (°C)", "Humidity (%)", "Wind (raw)", "hr", "mnth",
+                 "workingday", "holiday", "weathersit", "cnt"]
+c_all = df[corr_all_cols].corr()
+temp_atemp = c_all.loc["Temp (°C)", "Feels-like (°C)"]
+wsit_cnt = c_all.loc["weathersit", "cnt"]
 
 # ---------------- Filters ----------------
 st.sidebar.header("Filters")
@@ -85,9 +132,8 @@ c[5].metric("Busiest day", f"{daily.max():,}", str(daily.idxmax().date()))
 
 st.divider()
 
-# ---------------- Charts ----------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["⏰ When", "📅 Season & trend", "🌦️ Weather", "👥 Who", "🔬 Deep dive"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    ["⏰ When", "📅 Season & trend", "🌦️ Weather", "👥 Who", "🔬 Deep dive", "🧹 Data & features"])
 
 # ===== TAB 1: WHEN =====
 with tab1:
@@ -95,20 +141,35 @@ with tab1:
     g = f.groupby(["hr", "Day type"]).cnt.mean().reset_index()
     show(px.line(g, x="hr", y="cnt", color="Day type", markers=True,
                  labels={"hr": "Hour of day", "cnt": "Avg rentals per hour"}))
+    answer(f"**Working days have two commute peaks**, at 8:00 (~{wk_peak8:.0f} rentals/hour) and 17:00–18:00 "
+           f"(~{wk_peak17:.0f} at 17:00), with a lower midday plateau. **Non-working days have one broad hump** "
+           f"from about 11:00 to 16:00, peaking at {nw_hr}:00 (~{nw_val:.0f}). Demand is lowest between 2:00 and 5:00 on all days.")
 
-    st.subheader("Q2. Which weekday and hour combinations are busiest?")
+    st.subheader("Q2. Which weekday and hour combinations are busiest, and does the day of the week matter?")
+    a, b = st.columns([2, 1])
     h = f.pivot_table(index="Weekday", columns="hr", values="cnt", aggfunc="mean").reindex(list(DAYS.values()))
-    show(px.imshow(h, aspect="auto", color_continuous_scale="YlOrRd",
-                   labels={"x": "Hour", "color": "Avg rentals"}))
+    with a:
+        show(px.imshow(h, aspect="auto", color_continuous_scale="YlOrRd",
+                       labels={"x": "Hour", "color": "Avg rentals"}, title="Avg rentals by weekday and hour"))
+    wd = f.groupby("Weekday").cnt.mean().reindex(list(DAYS.values())).reset_index()
+    with b:
+        show(px.bar(wd, x="Weekday", y="cnt", labels={"cnt": "Avg rentals per hour"}, title="Average by weekday"))
+    answer(f"The hottest cells are working-day mornings (8:00) and evenings (17:00–18:00), and weekend afternoons. "
+           f"**The weekday matters little for the total**: averages range only from {wd_mean.min():.0f} to {wd_mean.max():.0f} rentals/hour; "
+           f"what changes by day is the *shape* of the day (commute peaks vs midday hump).")
 
     st.subheader("Q3. Do public holidays behave like weekends or like working days?")
     g = f.groupby(["hr", "Day category"]).cnt.mean().reset_index()
     show(px.line(g, x="hr", y="cnt", color="Day category", markers=True,
                  labels={"hr": "Hour of day", "cnt": "Avg rentals per hour"}))
+    answer(f"**Like weekends, only quieter.** Average rentals per hour: holidays {dc.get('Holiday', float('nan')):.0f}, "
+           f"weekends {dc.get('Weekend', float('nan')):.0f}, working days {dc.get('Working day', float('nan')):.0f}. "
+           f"Holidays have no sharp commute peaks, just a broad midday hump about 20% lower than weekends. "
+           f"There are only about 21 holiday days in the data, so this estimate is based on few days.")
 
 # ===== TAB 2: SEASON & TREND =====
 with tab2:
-    st.subheader("Q4. How do seasons and growth affect demand?")
+    st.subheader("Q4. How do seasons and months affect demand?")
     a, b = st.columns(2)
     m = f.groupby(["mnth", "Year"]).cnt.mean().reset_index()
     with a:
@@ -124,6 +185,9 @@ with tab2:
     show(px.line(d, x="dteday", y=["cnt", "7-day average"],
                  labels={"dteday": "Date", "value": "Daily rentals", "variable": ""},
                  title="Daily total rentals"))
+    answer(f"**Summer is busiest** ({sm['Summer']:.0f} rentals/hour), then spring ({sm['Spring']:.0f}) and fall ({sm['Fall']:.0f}); "
+           f"**winter is about half of summer** ({sm['Winter']:.0f}). Demand climbs from January to a summer/early-autumn peak and falls toward December. "
+           f"Every month of 2012 is above the same month of 2011, so there is a strong trend on top of the seasonality.")
 
     st.subheader("Q5. Was growth from 2011 to 2012 the same in every month?")
     mm = base.pivot_table(index="mnth", columns="Year", values="cnt", aggfunc="sum")
@@ -134,6 +198,9 @@ with tab2:
         st.caption("Uses all sidebar filters except Year.")
     else:
         st.info("Not enough data for both years with the current filters.")
+    answer(f"**No.** Overall rentals grew **{growth:.0%}**, but month by month growth ranged from {mg.min():.0f}% "
+           f"({MONTHS[int(mg.idxmin()) - 1]}) to {mg.max():.0f}% ({MONTHS[int(mg.idxmax()) - 1]}). "
+           f"Growth was largest in the first months, when the 2011 base was small, and about +40–45% in May–July.")
 
     st.subheader("Q6. Which were the busiest and the quietest days?")
     day_info = (f.groupby("dteday")
@@ -147,7 +214,10 @@ with tab2:
     a.dataframe(day_info.nlargest(10, "Rentals"), hide_index=True)
     b.markdown("**Top 10 quietest days**")
     b.dataframe(day_info.nsmallest(10, "Rentals"), hide_index=True)
-    st.caption("Days are totals within the current filters.")
+    st.caption("Tables use the current filters (daily totals within the filters).")
+    answer(f"On the full data the busiest day is {dday.idxmax().date()} with {dday.max():,} rentals and the quietest is "
+           f"{dday.idxmin().date()} with only {dday.min():,}. The busiest days are mild, dry days in 2012 (mostly September and spring/summer Fridays and Saturdays); "
+           f"the quietest are storm days or cold, rainy winter days, mostly in 2011, plus Christmas days.")
 
 # ===== TAB 3: WEATHER =====
 with tab3:
@@ -169,18 +239,26 @@ with tab3:
     with b:
         show(px.bar(x=wb.index.astype(str), y=wb.values,
                     labels={"x": "Wind speed", "y": "Avg rentals per hour"}, title="By wind speed"))
+    answer(f"**Weather matters a lot.** Clear weather averages {w_means[1]:.0f} rentals/hour, mist/cloudy {w_means[2]:.0f} and "
+           f"light rain/snow {w_means[3]:.0f} (about {1 - w_means[3] / w_means[1]:.0%} below clear). Demand rises with temperature up to roughly "
+           f"25–30 °C and flattens or drops in extreme heat; high humidity lowers it; wind has a weak effect. "
+           f"Category 4 (heavy rain/snow) has only {int((df.weathersit == 4).sum())} rows, so ignore its average.")
 
     st.subheader("Q8. Does bad weather erase the commute peaks or just shrink them?")
     g = f.groupby(["hr", "Weather"]).cnt.mean().reset_index()
     show(px.line(g, x="hr", y="cnt", color="Weather", markers=True,
                  labels={"hr": "Hour of day", "cnt": "Avg rentals per hour"}))
+    answer(f"**It shrinks them, it doesn't erase them.** In light rain/snow the 8:00 and 17:00 peaks are still there but "
+           f"{red8:.0%} and {red17:.0%} lower than in clear weather. Mist/cloudy is close to clear at commute hours and lower at midday, "
+           f"so commuters mostly still ride.")
 
     st.subheader("Q9. Which weather variable is most strongly related to demand?")
-    wcols = ["Temp (°C)", "Feels-like (°C)", "Humidity (%)", "Wind (raw)"]
-    cr = f[wcols + ["cnt"]].corr()["cnt"].drop("cnt").reset_index()
+    cr = f[WCOLS + ["cnt"]].corr()["cnt"].drop("cnt").reset_index()
     cr.columns = ["Variable", "Correlation with rentals"]
     show(px.bar(cr, x="Variable", y="Correlation with rentals", range_y=[-1, 1]))
-    st.caption("Pearson correlation with hourly rentals. Temperature and feels-like temperature are almost the same signal.")
+    st.caption("Pearson correlation with hourly rentals (current filters).")
+    answer(f"**{corr.abs().idxmax()}** is the strongest (full data: {corr_txt}). Temperature and feels-like temperature carry nearly the same "
+           f"signal, so use only one in a linear model. The correlations are modest because the hour of the day explains much of the variation.")
 
 # ===== TAB 4: WHO =====
 with tab4:
@@ -189,6 +267,8 @@ with tab4:
     show(px.line(r, x="hr", y="Avg rentals", color="User type", markers=True, labels={"hr": "Hour of day"}))
     split = f.groupby("Day type")[["casual", "registered"]].sum().reset_index().melt("Day type", var_name="User type", value_name="Rentals")
     show(px.bar(split, x="Day type", y="Rentals", color="User type", barmode="group"))
+    answer("**Registered users create the commute peaks** (8:00 and 17:00–18:00). Casual riders are far fewer and follow a flat afternoon curve; "
+           "they matter relatively more on non-working days.")
 
     st.subheader("Q11. When do casual riders make up the biggest share?")
     a, b = st.columns(2)
@@ -200,6 +280,10 @@ with tab4:
     ch = (ch.casual / ch.cnt * 100).reset_index(name="Casual share %")
     with b:
         show(px.line(ch, x="hr", y="Casual share %", markers=True, title="Casual share by hour"))
+    answer(f"Casual riders are **{cas_share['Non-working day']:.0%} of rentals on non-working days vs {cas_share['Working day']:.0%} on working days**. "
+           f"By season the share is highest in spring ({cas_season['Spring']:.0%}) and summer ({cas_season['Summer']:.0%}) and lowest in winter ({cas_season['Winter']:.0%}). "
+           f"By hour it peaks around {cas_hr.idxmax()}:00 ({cas_hr.max():.0%}) and is lowest at {cas_hr.idxmin()}:00 ({cas_hr.min():.0%}). "
+           f"Casual riders are mostly leisure riders on warm weekend afternoons.")
 
 # ===== TAB 5: DEEP DIVE =====
 with tab5:
@@ -207,6 +291,9 @@ with tab5:
     mh = f.pivot_table(index="Month", columns="hr", values="cnt", aggfunc="mean").reindex(MONTHS)
     show(px.imshow(mh, aspect="auto", color_continuous_scale="YlOrRd",
                    labels={"x": "Hour", "color": "Avg rentals"}))
+    answer(f"The single busiest cell is **{MONTHS[mh_m - 1]} at {mh_h}:00** ({mh_full.loc[mh_m, mh_h]:.0f} average rentals). In general the hottest band is "
+           f"17:00–18:00 from May to October, the 8:00 peak is the second-strongest band in every month, January, February and December are light all day, "
+           f"and 0:00–5:00 is quiet in every month.")
 
     st.subheader("Q13. How variable is hourly demand, and where are the outliers?")
     log_y = st.checkbox("Log scale on histogram", value=False)
@@ -216,43 +303,66 @@ with tab5:
                           labels={"cnt": "Rentals in one hour"}, title="Distribution of hourly rentals"))
     with b:
         show(px.box(f, x="hr", y="cnt", labels={"hr": "Hour", "cnt": "Rentals"}, title="Spread by hour"))
-    st.caption(f"Skewness of hourly rentals: {f.cnt.skew():.2f}. A positive value means a long tail of very busy hours.")
+    st.caption(f"Skewness of hourly rentals in the current selection: {f.cnt.skew():.2f}.")
+    answer(f"Hourly demand is **right-skewed** (skew {skew_cnt:.2f}): many quiet hours and a long tail up to about {df.cnt.max():,} rentals. "
+           f"**Variability is largest at the commute peaks** (widest spread at {', '.join(str(x) + ':00' for x in iqr_top)}), so the same hour can be quiet "
+           f"or very busy depending on the day. The outliers at midday and at night are unusually busy hours for that time (typically warm weekend days), not data errors.")
+
+# ===== TAB 6: DATA & FEATURES =====
+with tab6:
+    st.subheader("Q14. Is the data clean?")
+    k = st.columns(5)
+    k[0].metric("Rows", f"{len(df):,}")
+    k[1].metric("Missing values", int(df.isna().sum().sum()))
+    k[2].metric("Duplicate rows", int(df.duplicated().sum()))
+    k[3].metric("Missing hours", missing_hours)
+    k[4].metric("Wind = 0", f"{wind_zero:.1%}")
+    wc = df.Weather.value_counts().reindex(list(WEATHER.values())).reset_index()
+    wc.columns = ["Weather", "Rows"]
+    show(px.bar(wc, x="Weather", y="Rows", title="Rows per weather category"))
+    with st.expander("Summary statistics"):
+        st.dataframe(df[["cnt", "casual", "registered", "Temp (°C)", "Feels-like (°C)",
+                         "Humidity (%)", "Wind (raw)"]].describe().T)
+    answer(f"**Yes, with small caveats.** {len(df):,} rows, no missing values, no duplicates, and `casual + registered = cnt` holds in every row. "
+           f"{missing_hours} hours out of {expected_rows:,} are absent (hours with zero rentals are not recorded). "
+           f"{wind_zero:.1%} of wind values are exactly zero (probably missing or coarse data), and weather category 4 has only "
+           f"{int((df.weathersit == 4).sum())} rows, so merge it with category 3 when modelling.")
+
+    st.subheader("Q15. What does the target (hourly rentals) look like, and does a log transform help?")
+    a, b = st.columns(2)
+    with a:
+        show(px.histogram(df, x="cnt", nbins=60, title="cnt"))
+    with b:
+        show(px.histogram(x=np.log1p(df.cnt), nbins=60, labels={"x": "log(1 + cnt)"}, title="log1p(cnt)"))
+    answer(f"`cnt` is right-skewed (skew {skew_cnt:.2f}). After a log1p transform the skew is {skew_log:.2f}, so the distribution is much more symmetric. "
+           f"A log transform is worth trying for modelling. Do not use `casual` or `registered` as features for `cnt` (they add up to it: leakage).")
+
+    st.subheader("Q16. Which variables are related to each other (and which are redundant)?")
+    cm = f[corr_all_cols].corr()
+    show(px.imshow(cm, text_auto=".2f", color_continuous_scale="RdBu_r", zmin=-1, zmax=1, aspect="auto"))
+    answer(f"**Temperature and feels-like temperature are almost the same variable** (correlation {temp_atemp:+.2f}), so keep only one for linear models. "
+           f"Rentals are most related to the hour of the day and to temperature; the weather category has a negative relation with rentals ({wsit_cnt:+.2f}): worse weather, fewer rides. "
+           f"Hour of day is cyclical (23:00 is next to 0:00), so for modelling use categorical or sin/cos encoding.")
 
 st.divider()
 
-# ---------------- Conclusions (computed on the full dataset) ----------------
+# ---------------- Conclusions ----------------
 st.header("📌 Conclusions")
-fh = df.groupby(["hr", "Day type"]).cnt.mean()
-y = df.groupby("Year").cnt.sum()
-growth = y[2012] / y[2011] - 1
-w_means = df.groupby("weathersit").cnt.mean()
-dc = df.groupby("Day category").cnt.mean()
-cas = df.groupby("Day type")[["casual", "cnt"]].sum()
-cas_share = cas.casual / cas.cnt
-corr = df[["Temp (°C)", "Feels-like (°C)", "Humidity (%)", "Wind (raw)", "cnt"]].corr()["cnt"].drop("cnt")
-mmf = df.pivot_table(index="mnth", columns="Year", values="cnt", aggfunc="sum")
-mg = (mmf[2012] / mmf[2011] - 1) * 100
-dday = df.groupby("dteday").cnt.sum()
-corr_txt = ", ".join(f"{k.split(' (')[0].lower()} {v:+.2f}" for k, v in corr.items())
-
 st.markdown(f"""
 1. **Demand is commuter-driven.** On working days there are two sharp peaks, at **8:00** and **17:00–18:00**
-   (about {fh[(8, 'Working day')]:.0f} and {fh[(17, 'Working day')]:.0f} rentals per hour on average).
-   On non-working days there is a single broad midday hump from about 11:00 to 16:00.
-2. **Holidays follow the weekend pattern.** Average hourly rentals are {dc.get('Holiday', float('nan')):.0f} on holidays,
+   (about {wk_peak8:.0f} and {wk_peak17:.0f} rentals per hour on average). On non-working days there is a single broad midday hump.
+2. **Holidays look like weekends, only quieter.** Average hourly rentals are {dc.get('Holiday', float('nan')):.0f} on holidays,
    {dc.get('Weekend', float('nan')):.0f} on weekends and {dc.get('Working day', float('nan')):.0f} on regular working days.
-3. **Registered users create the peaks.** Registered riders follow the commute pattern. Casual riders are a smaller, flatter afternoon group:
-   they are {cas_share['Non-working day']:.0%} of rentals on non-working days versus {cas_share['Working day']:.0%} on working days.
-4. **Demand is seasonal.** Summer is the busiest season and winter the quietest, with winter roughly half of summer.
-   Rentals rise with temperature up to the high 20s °C and fall off in extreme heat.
-5. **The service grew strongly.** Total rentals rose **{growth:.0%}** from 2011 to 2012. Month by month the growth ranged
-   from {mg.min():.0f}% to {mg.max():.0f}%, so growth is a separate effect from seasonality.
-6. **Bad weather cuts demand.** Average hourly rentals fall from {w_means[1]:.0f} in clear weather to {w_means[3]:.0f}
-   in light rain or snow. Of the four weather variables, **{corr.abs().idxmax()}** is most strongly related to demand
-   (correlation {corr[corr.abs().idxmax()]:+.2f}). All four: {corr_txt}.
-7. **Day of the week matters little in total.** Weekday averages are similar; what changes is the *shape* of the day.
-8. **Extremes.** The busiest day had {dday.max():,} rentals ({dday.idxmax().date()}) and the quietest only {dday.min():,} ({dday.idxmin().date()}).
-   Hourly demand is right-skewed: most hours are modest and a minority of commute hours are very busy.
+3. **Registered users create the peaks.** Casual riders are {cas_share['Non-working day']:.0%} of rentals on non-working days versus {cas_share['Working day']:.0%} on working days.
+4. **Demand is seasonal.** Summer is the busiest season and winter the quietest (about half of summer).
+5. **The service grew strongly.** Total rentals rose **{growth:.0%}** from 2011 to 2012; month by month the growth ranged from {mg.min():.0f}% to {mg.max():.0f}%.
+6. **Bad weather cuts demand.** Average hourly rentals fall from {w_means[1]:.0f} in clear weather to {w_means[3]:.0f} in light rain or snow,
+   but the commute peaks are shrunk, not erased. **{corr.abs().idxmax()}** is the weather variable most related to demand ({corr_txt}).
+7. **Day of the week matters little in total;** it changes the *shape* of the day.
+8. **Extremes.** Busiest day {dday.max():,} rentals ({dday.idxmax().date()}); quietest {dday.min():,} ({dday.idxmin().date()}).
+   Hourly demand is right-skewed (skew {skew_cnt:.2f}).
+9. **Data caveats.** {missing_hours} unrecorded hours, {wind_zero:.1%} zero wind values, only {int((df.weathersit == 4).sum())} rows in weather category 4,
+   and `temp`/`atemp` are almost identical.
 
 **Recommendations:** rebalance and service bikes before 8:00 and 16:00 on working days,
 schedule maintenance in the overnight trough (0:00–5:00), run promotions for casual riders on warm weekend afternoons,

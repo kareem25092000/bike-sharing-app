@@ -5,15 +5,16 @@ Interactive Streamlit app analysing **17,379 hourly bike rentals** in Washington
 **Live app:** https://YOUR-APP-NAME.streamlit.app  *(replace after deploying)*
 
 ## What the app shows
-Thirteen questions, grouped in five tabs:
+Sixteen questions in six tabs. **Every question has a chart and a written ✅ answer** (answers are computed on the full dataset).
 
-| Tab | Questions answered |
+| Tab | Questions |
 |---|---|
-| ⏰ When | Q1 Which hours are busiest on working vs non-working days? Q2 Which weekday × hour combinations are busiest (heatmap)? Q3 Do holidays behave like weekends or working days? |
-| 📅 Season & trend | Q4 How do months and seasons affect demand? Q5 Was 2011→2012 growth the same in every month? Q6 Which were the busiest and quietest days? |
-| 🌦️ Weather | Q7 How much do weather, temperature, humidity and wind matter? Q8 Does bad weather erase the commute peaks or only shrink them? Q9 Which weather variable correlates most with demand? |
-| 👥 Who | Q10 How do casual and registered riders differ through the day? Q11 When do casual riders make up the biggest share? |
-| 🔬 Deep dive | Q12 Which month × hour combinations are busiest? Q13 How variable is hourly demand and where are the outliers? |
+| ⏰ When | Q1 Which hours are busiest? Q2 Which weekday × hour combinations are busiest, and does the weekday matter? Q3 Do holidays behave like weekends or working days? |
+| 📅 Season & trend | Q4 How do seasons and months affect demand? Q5 Was 2011→2012 growth the same in every month? Q6 Busiest and quietest days |
+| 🌦️ Weather | Q7 How much does weather matter? Q8 Does bad weather erase the commute peaks? Q9 Which weather variable matters most? |
+| 👥 Who | Q10 Casual vs registered riders through the day. Q11 When is the casual share highest? |
+| 🔬 Deep dive | Q12 Busiest month × hour combinations. Q13 Variability and outliers |
+| 🧹 Data & features | Q14 Is the data clean? Q15 Target distribution and log transform. Q16 Correlation matrix and redundant variables |
 
 **Filters (sidebar):** year, season, day type, weather, hour range, temperature range.
 **KPIs:** total rentals, average per hour, average per day, peak hour, registered share, busiest day.
